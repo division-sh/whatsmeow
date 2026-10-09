@@ -31,8 +31,10 @@ type FrameSocket struct {
 	HTTPHeaders http.Header
 	HTTPClient  *http.Client
 
-	Frames       chan []byte
-	OnDisconnect func(ctx context.Context, remote bool)
+	Frames chan []byte
+
+	onDisconnectLock sync.Mutex
+	onDisconnect     func(ctx context.Context, remote bool)
 
 	Header []byte
 
@@ -64,6 +66,21 @@ func (fs *FrameSocket) IsConnected() bool {
 	return fs.conn.Load() != nil
 }
 
+// SetOnDisconnect replaces the disconnect handler. Setting nil suppresses
+// future selections, but does not revoke a callback already selected by Close.
+func (fs *FrameSocket) SetOnDisconnect(handler func(context.Context, bool)) {
+	fs.onDisconnectLock.Lock()
+	defer fs.onDisconnectLock.Unlock()
+	fs.onDisconnect = handler
+}
+
+// GetOnDisconnect returns a snapshot of the current disconnect handler.
+func (fs *FrameSocket) GetOnDisconnect() func(context.Context, bool) {
+	fs.onDisconnectLock.Lock()
+	defer fs.onDisconnectLock.Unlock()
+	return fs.onDisconnect
+}
+
 func (fs *FrameSocket) Close(code websocket.StatusCode) {
 	fs.lock.Lock()
 	defer fs.lock.Unlock()
@@ -87,8 +104,8 @@ func (fs *FrameSocket) Close(code websocket.StatusCode) {
 	}
 	fs.cancel()
 	fs.cancel = nil
-	if fs.OnDisconnect != nil {
-		go fs.OnDisconnect(fs.parentCtx, code == 0)
+	if onDisconnect := fs.GetOnDisconnect(); onDisconnect != nil {
+		go onDisconnect(fs.parentCtx, code == 0)
 	}
 }
 
