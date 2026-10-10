@@ -63,8 +63,12 @@ func (cli *Client) waitResponse(reqID string) chan *waBinary.Node {
 
 func (cli *Client) cancelResponse(reqID string, ch chan *waBinary.Node) {
 	cli.responseWaitersLock.Lock()
-	close(ch)
-	delete(cli.responseWaiters, reqID)
+	// Removal transfers ownership to response delivery or disconnect cleanup.
+	// A late cancellation must not close their waiter or remove a replacement.
+	if waiter, ok := cli.responseWaiters[reqID]; ok && waiter == ch {
+		delete(cli.responseWaiters, reqID)
+		close(ch)
+	}
 	cli.responseWaitersLock.Unlock()
 }
 
